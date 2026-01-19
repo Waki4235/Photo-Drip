@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Travel Photo Drip Demo (Timeline + 2 Companions)</title>
+  <style>
+    :root{
+      --bg:#0b0c10; --panel:#12131a; --text:#e9e9ee; --muted:#a6a6b3; --line:#242635;
+      --accent:#6ee7ff;
+      --c1:#ffcf6e; /* 同行者1枠（黄色） */
+      --c2:#00b7ff; /* 同行者2枠（水色） */
+    }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);}
+    header{position:sticky;top:0;z-index:10;background:rgba(11,12,16,.92);backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--line);padding:14px 14px 10px;}
+    h1{margin:0;font-size:16px;font-weight:900}
+    .sub{margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.4}
+    main{max-width:1100px;margin:0 auto;padding:14px;display:grid;gap:12px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+    .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    button{border:1px solid var(--line);background:#171a25;color:var(--text);padding:10px 12px;border-radius:12px;
+      font-weight:700;cursor:pointer}
+    button:hover{border-color:#3a3d55}
+    input[type="file"]{max-width:100%}
+    input[type="text"]{
+      border:1px solid var(--line);background:#0f111a;color:var(--text);
+      padding:10px 12px;border-radius:12px;min-width:160px;outline:none;
+    }
+    input[type="text"]::placeholder{color:#6b6e86}
+    .pill{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--muted)}
+    .hint{font-size:12px;color:var(--muted);line-height:1.6;margin:10px 0 0}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px}
+    .card{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#0f111a}
+    .card img{width:100%;height:150px;object-fit:cover;display:block}
+    .meta{padding:8px 10px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+    .tag{font-weight:900}
+    .tag.mine{color:var(--accent)}
+    .tag.c1{color:var(--c1)}
+    .tag.c2{color:var(--c2)}
+    .badge{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.15);
+      padding:6px 8px;border-radius:999px;font-size:12px;font-weight:900}
+    .badge.mine{color:var(--accent)}
+    .badge.c1{color:var(--c1)}
+    .badge.c2{color:var(--c2)}
+    .frameC1{outline:3px solid rgba(255,207,110,.95); outline-offset:-3px}
+    .frameC2{outline:4px solid rgba(0,183,255,.98);outline-offset:-4px;box-shadow: 0 0 0 2px rgba(0,183,255,.25);}
+    .split{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:900px){ .split{grid-template-columns:520px 1fr} }
+    .label{font-size:12px;color:var(--muted);font-weight:900;margin:0 0 4px}
+    hr{border:0;border-top:1px solid var(--line);margin:10px 0}
+  </style>
+
+  <!-- EXIF読み取り（撮影日時の取得用） -->
+  <script src="https://unpkg.com/exifr/dist/lite.umd.js"></script>
+</head>
+
+<body>
+<header>
+  <h1>旅行写真の “じわじわ共有” デモ（時系列＋同行者2人）</h1>
+  <p class="sub">
+    表示は「撮影日時（EXIF）順」。開くたびに同行者の写真が1〜2枚ずつ増えて、自分のタイムラインに“割り込んでくる”ように混ざります。
+    ※EXIFが取れない画像はアップロード日時で代用します。
+  </p>
+</header>
+
+<main class="split">
+  <section class="panel">
+    <p class="label">自分の写真（アップロードして保持）</p>
+    <div class="row">
+      <input id="myFiles" type="file" accept="image/*" multiple />
+      <button id="clearMine">自分写真を全削除</button>
+      <span class="pill">自分写真: <b id="minePool">0</b> 枚</span>
+    </div>
+
+    <hr>
+
+    <p class="label">同行者①（枠：黄色）名前欄＋アップロード</p>
+    <div class="row">
+      <input id="c1Name" type="text" placeholder="例：Aさん" />
+      <input id="c1Files" type="file" accept="image/*" multiple />
+      <button id="clearC1">同行者①を全削除</button>
+      <span class="pill">同行者①プール: <b id="c1Pool">0</b> 枚</span>
+    </div>
+
+    <hr>
+
+    <p class="label">同行者②（枠：水色）名前欄＋アップロード</p>
+    <div class="row">
+      <input id="c2Name" type="text" placeholder="例：Bさん" />
+      <input id="c2Files" type="file" accept="image/*" multiple />
+      <button id="clearC2">同行者②を全削除</button>
+      <span class="pill">同行者②プール: <b id="c2Pool">0</b> 枚</span>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button id="reset">リセット（混ざりを最初から）</button>
+      <button id="shuffle">並び替え（デモ用）</button>
+      <span class="pill">混ざった同行者①: <b id="mixedC1">0</b> 枚</span>
+      <span class="pill">混ざった同行者②: <b id="mixedC2">0</b> 枚</span>
+    </div>
+
+    <p class="hint">
+      使い方：①自分写真をアップロード（保持）→ ②同行者①/②の名前を入力して写真アップロード（保持）→ ③ページを再読み込みすると同行者写真が少しずつ増えて混ざります。<br/>
+      ※保存は同端末のブラウザ内（IndexedDB）です。
+    </p>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between">
+      <div class="pill">表示: <b id="total">0</b> 枚</div>
+      <div class="pill">自分: <b id="mineN">0</b> / 同行者①: <b id="c1N">0</b> / 同行者②: <b id="c2N">0</b></div>
+    </div>
+    <div id="grid" class="grid"></div>
+  </section>
+</main>
+
+<script>
+/** ============================================
+ * IndexedDB（自分 + 同行者① + 同行者② を保存）
+ * ============================================ */
+const DB_NAME = "drip_demo_db_v3";
+const DB_VERSION = 1;
+const STORE_MINE = "mine";
+const STORE_C1 = "companion1";
+const STORE_C2 = "companion2";
+
+function openDB(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(STORE_MINE)) db.createObjectStore(STORE_MINE, { keyPath: "id" });
+      if(!db.objectStoreNames.contains(STORE_C1)) db.createObjectStore(STORE_C1, { keyPath: "id" });
+      if(!db.objectStoreNames.contains(STORE_C2)) db.createObjectStore(STORE_C2, { keyPath: "id" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function promisifyRequest(req){
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function withStore(storeName, mode, fn){
+  const db = await openDB();
+  const tx = db.transaction(storeName, mode);
+  const store = tx.objectStore(storeName);
+  const result = await fn(store);
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  db.close();
+  return result;
+}
+async function listKeys(storeName){
+  return withStore(storeName, "readonly", async (store) => (await promisifyRequest(store.getAllKeys())) || []);
+}
+async function getById(storeName, id){
+  return withStore(storeName, "readonly", async (store) => await promisifyRequest(store.get(id)));
+}
+async function putRow(storeName, row){
+  return withStore(storeName, "readwrite", async (store) => { store.put(row); });
+}
+async function clearStore(storeName){
+  return withStore(storeName, "readwrite", async (store) => { store.clear(); });
+}
+
+/** ============================================
+ * localStorage（混ざり進行 & 同行者の固定順序）
+ * ============================================ */
+const LS_MIXED_C1 = "drip_mixed_c1_v1";
+const LS_MIXED_C2 = "drip_mixed_c2_v1";
+const LS_ORDER_C1 = "drip_order_c1_v1";
+const LS_ORDER_C2 = "drip_order_c2_v1";
+const LS_NAME_C1 = "drip_name_c1_v1";
+const LS_NAME_C2 = "drip_name_c2_v1";
+
+function nload(key){ const n=parseInt(localStorage.getItem(key)||"0",10); return Number.isFinite(n)?n:0; }
+function nsave(key,n){ localStorage.setItem(key,String(n)); }
+function aload(key){ try{return JSON.parse(localStorage.getItem(key)||"[]");}catch{return[];} }
+function asave(key,arr){ localStorage.setItem(key,JSON.stringify(arr)); }
+function sload(key){ return (localStorage.getItem(key)||""); }
+function ssave(key,val){ localStorage.setItem(key,val); }
+
+function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
+function shuffleArray(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// 1回開くたびに「合計 1〜2 枚」増える
+function dripTotalAmount(){ return 1 + Math.floor(Math.random() * 2); }
+
+/** 同行者ストアごとに「固定ランダム順」を用意 */
+async function ensureOrder(storeName, lsOrderKey, lsMixedKey){
+  const ids = await listKeys(storeName);
+  const set = new Set(ids);
+  let order = aload(lsOrderKey).filter(id => set.has(id));
+  for(const id of ids){ if(!order.includes(id)) order.push(id); }
+
+  const stored = aload(lsOrderKey);
+  if(stored.length !== ids.length || stored.length === 0){
+    order = shuffleArray(ids);
+    asave(lsOrderKey, order);
+    nsave(lsMixedKey, 0);
+  }else{
+    asave(lsOrderKey, order);
+  }
+  return { ids, order };
+}
+
+/** 「開くたび」に、C1/C2どちらか（残数がある方）へ 1〜2 枚分を割り振る */
+async function stepDripCombined(){
+  const c1 = await ensureOrder(STORE_C1, LS_ORDER_C1, LS_MIXED_C1);
+  const c2 = await ensureOrder(STORE_C2, LS_ORDER_C2, LS_MIXED_C2);
+
+  let mixed1 = nload(LS_MIXED_C1);
+  let mixed2 = nload(LS_MIXED_C2);
+
+  const max1 = c1.ids.length;
+  const max2 = c2.ids.length;
+
+  const k = dripTotalAmount();
+  for(let i=0;i<k;i++){
+    const can1 = mixed1 < max1;
+    const can2 = mixed2 < max2;
+    if(!can1 && !can2) break;
+
+    // 残っている方からランダムに選ぶ（両方あるなら50:50）
+    if(can1 && can2){
+      if(Math.random() < 0.5) mixed1++; else mixed2++;
+    }else if(can1){
+      mixed1++;
+    }else{
+      mixed2++;
+    }
+  }
+
+  nsave(LS_MIXED_C1, clamp(mixed1, 0, max1));
+  nsave(LS_MIXED_C2, clamp(mixed2, 0, max2));
+}
+
+/** ============================================
+ * EXIFから撮影日時を取り出す
+ * ============================================ */
+// exifr.lite で DateTimeOriginal などを読む
+async function extractTakenAtMs(fileOrBlob){
+  try{
+    // lite版は DateTimeOriginal / CreateDate / ModifyDate あたりを返すことが多い
+    const data = await exifr.parse(fileOrBlob, { translateValues: true });
+    const dt =
+      data?.DateTimeOriginal ||
+      data?.CreateDate ||
+      data?.ModifyDate ||
+      data?.DateTimeDigitized ||
+      null;
+
+    if(dt instanceof Date) return dt.getTime();
+    if(typeof dt === "string"){
+      const t = Date.parse(dt);
+      if(Number.isFinite(t)) return t;
+    }
+  }catch(e){
+    // EXIF無し/読めない場合は無視
+  }
+  return null;
+}
+
+/** ============================================
+ * UI / 描画
+ * ============================================ */
+const elMyFiles = document.getElementById("myFiles");
+
+const elC1Name = document.getElementById("c1Name");
+const elC1Files = document.getElementById("c1Files");
+
+const elC2Name = document.getElementById("c2Name");
+const elC2Files = document.getElementById("c2Files");
+
+const elGrid = document.getElementById("grid");
+const elTotal = document.getElementById("total");
+
+const elMinePool = document.getElementById("minePool");
+const elC1Pool = document.getElementById("c1Pool");
+const elC2Pool = document.getElementById("c2Pool");
+
+const elMineN = document.getElementById("mineN");
+const elC1N = document.getElementById("c1N");
+const elC2N = document.getElementById("c2N");
+
+const elMixedC1 = document.getElementById("mixedC1");
+const elMixedC2 = document.getElementById("mixedC2");
+
+let mineObjUrls = [];
+let c1ObjUrls = [];
+let c2ObjUrls = [];
+let shuffledView = false;
+
+function escapeHtml(s){
+  return String(s)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+function revokeUrls(arr){
+  for(const u of arr) URL.revokeObjectURL(u);
+  arr.length = 0;
+}
+
+async function refreshPoolCounts(){
+  const mineIds = await listKeys(STORE_MINE);
+  const c1Ids = await listKeys(STORE_C1);
+  const c2Ids = await listKeys(STORE_C2);
+  elMinePool.textContent = String(mineIds.length);
+  elC1Pool.textContent = String(c1Ids.length);
+  elC2Pool.textContent = String(c2Ids.length);
+
+  elMixedC1.textContent = String(nload(LS_MIXED_C1));
+  elMixedC2.textContent = String(nload(LS_MIXED_C2));
+}
+
+async function buildItemsForView(){
+  revokeUrls(mineObjUrls); revokeUrls(c1ObjUrls); revokeUrls(c2ObjUrls);
+
+  // 自分：全件表示
+  const mineIds = await listKeys(STORE_MINE);
+  const mineItems = [];
+  for(const id of mineIds){
+    const row = await getById(STORE_MINE, id);
+    if(!row?.blob) continue;
+    const url = URL.createObjectURL(row.blob);
+    mineObjUrls.push(url);
+    const meta = row.meta || {};
+    mineItems.push({
+      kind: "mine",
+      who: "自分",
+      note: meta.name || "",
+      ts: meta.takenAtMs ?? row.createdAt ?? 0,
+      src: url
+    });
+  }
+
+  // 同行者①：混ざった分だけ（固定ランダム順の先頭から）
+  const { order: order1 } = await ensureOrder(STORE_C1, LS_ORDER_C1, LS_MIXED_C1);
+  const n1 = clamp(nload(LS_MIXED_C1), 0, order1.length);
+  const c1Items = [];
+  for(const id of order1.slice(0, n1)){
+    const row = await getById(STORE_C1, id);
+    if(!row?.blob) continue;
+    const url = URL.createObjectURL(row.blob);
+    c1ObjUrls.push(url);
+    const meta = row.meta || {};
+    c1Items.push({
+      kind: "c1",
+      who: meta.who || "同行者①",
+      note: meta.name || "",
+      ts: meta.takenAtMs ?? row.createdAt ?? 0,
+      src: url
+    });
+  }
+
+  // 同行者②：混ざった分だけ
+  const { order: order2 } = await ensureOrder(STORE_C2, LS_ORDER_C2, LS_MIXED_C2);
+  const n2 = clamp(nload(LS_MIXED_C2), 0, order2.length);
+  const c2Items = [];
+  for(const id of order2.slice(0, n2)){
+    const row = await getById(STORE_C2, id);
+    if(!row?.blob) continue;
+    const url = URL.createObjectURL(row.blob);
+    c2ObjUrls.push(url);
+    const meta = row.meta || {};
+    c2Items.push({
+      kind: "c2",
+      who: meta.who || "同行者②",
+      note: meta.name || "",
+      ts: meta.takenAtMs ?? row.createdAt ?? 0,
+      src: url
+    });
+  }
+
+  return { mineItems, c1Items, c2Items };
+}
+
+function renderTimeline(all){
+  // 時系列（昇順）で統合
+  all.sort((a,b) => (a.ts ?? 0) - (b.ts ?? 0));
+
+  // デモ用：並び替えボタンで全体シャッフル
+  if(shuffledView){
+    for(let i=all.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [all[i], all[j]] = [all[j], all[i]];
+    }
+  }
+
+  elGrid.innerHTML = "";
+  let mineCount=0, c1Count=0, c2Count=0;
+
+  for(const it of all){
+    if(it.kind==="mine") mineCount++;
+    if(it.kind==="c1") c1Count++;
+    if(it.kind==="c2") c2Count++;
+
+    const card = document.createElement("div");
+    if(it.kind==="c1") card.className = "card frameC1";
+    else if(it.kind==="c2") card.className = "card frameC2";
+    else card.className = "card";
+
+    const img = document.createElement("img");
+    img.src = it.src;
+    img.alt = it.note || "";
+
+    const badge = document.createElement("div");
+    badge.className = "badge " + it.kind;
+    badge.textContent = (it.kind==="mine") ? "自分" : `${it.who}の写真`;
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = `
+      <span class="tag ${it.kind}">${it.kind==="mine" ? "MY" : (it.kind==="c1" ? "MIXED-1" : "MIXED-2")}</span>
+      <span>${escapeHtml(it.note || "")}</span>
+    `;
+
+    card.appendChild(img);
+    card.appendChild(badge);
+    card.appendChild(meta);
+    elGrid.appendChild(card);
+  }
+
+  elTotal.textContent = String(all.length);
+  elMineN.textContent = String(mineCount);
+  elC1N.textContent = String(c1Count);
+  elC2N.textContent = String(c2Count);
+}
+
+async function refreshView(){
+  await refreshPoolCounts();
+  const { mineItems, c1Items, c2Items } = await buildItemsForView();
+  const all = [...mineItems, ...c1Items, ...c2Items];
+  renderTimeline(all);
+}
+
+/** ============================================
+ * 起動：開くたびに drip
+ * ============================================ */
+(async function boot(){
+  // 名前欄の復元
+  elC1Name.value = sload(LS_NAME_C1);
+  elC2Name.value = sload(LS_NAME_C2);
+
+  await stepDripCombined();
+  await refreshView();
+})();
+
+/** ============================================
+ * アップロード：自分
+ * ============================================ */
+document.getElementById("myFiles").addEventListener("change", async () => {
+  const files = Array.from(elMyFiles.files || []);
+  if(files.length === 0) return;
+
+  for(let i=0;i<files.length;i++){
+    const f = files[i];
+    const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "_m_" + i + "_" + Math.random().toString(16).slice(2));
+    const takenAtMs = await extractTakenAtMs(f);
+    await putRow(STORE_MINE, {
+      id,
+      blob: f,
+      meta: { name: f.name, takenAtMs },
+      createdAt: Date.now()
+    });
+  }
+  elMyFiles.value = "";
+  await refreshView();
+});
+
+document.getElementById("clearMine").addEventListener("click", async () => {
+  await clearStore(STORE_MINE);
+  await refreshView();
+});
+
+/** ============================================
+ * アップロード：同行者①
+ * ============================================ */
+elC1Name.addEventListener("input", () => ssave(LS_NAME_C1, elC1Name.value));
+
+elC1Files.addEventListener("change", async () => {
+  const files = Array.from(elC1Files.files || []);
+  if(files.length === 0) return;
+
+  const who = (elC1Name.value || "").trim();
+  if(!who){
+    alert("同行者①の名前を入力してからアップロードしてください（例：Aさん）");
+    elC1Files.value = "";
+    elC1Name.focus();
+    return;
+  }
+
+  for(let i=0;i<files.length;i++){
+    const f = files[i];
+    const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "_c1_" + i + "_" + Math.random().toString(16).slice(2));
+    const takenAtMs = await extractTakenAtMs(f);
+    await putRow(STORE_C1, {
+      id,
+      blob: f,
+      meta: { who, name: f.name, takenAtMs },
+      createdAt: Date.now()
+    });
+  }
+
+  // 新規追加分を順序に反映（既存順序は維持）
+  await ensureOrder(STORE_C1, LS_ORDER_C1, LS_MIXED_C1);
+
+  elC1Files.value = "";
+  await refreshView();
+});
+
+document.getElementById("clearC1").addEventListener("click", async () => {
+  await clearStore(STORE_C1);
+  asave(LS_ORDER_C1, []);
+  nsave(LS_MIXED_C1, 0);
+  await refreshView();
+});
+
+/** ============================================
+ * アップロード：同行者②（枠は水色）
+ * ============================================ */
+elC2Name.addEventListener("input", () => ssave(LS_NAME_C2, elC2Name.value));
+
+elC2Files.addEventListener("change", async () => {
+  const files = Array.from(elC2Files.files || []);
+  if(files.length === 0) return;
+
+  const who = (elC2Name.value || "").trim();
+  if(!who){
+    alert("同行者②の名前を入力してからアップロードしてください（例：Bさん）");
+    elC2Files.value = "";
+    elC2Name.focus();
+    return;
+  }
+
+  for(let i=0;i<files.length;i++){
+    const f = files[i];
+    const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "_c2_" + i + "_" + Math.random().toString(16).slice(2));
+    const takenAtMs = await extractTakenAtMs(f);
+    await putRow(STORE_C2, {
+      id,
+      blob: f,
+      meta: { who, name: f.name, takenAtMs },
+      createdAt: Date.now()
+    });
+  }
+
+  await ensureOrder(STORE_C2, LS_ORDER_C2, LS_MIXED_C2);
+
+  elC2Files.value = "";
+  await refreshView();
+});
+
+document.getElementById("clearC2").addEventListener("click", async () => {
+  await clearStore(STORE_C2);
+  asave(LS_ORDER_C2, []);
+  nsave(LS_MIXED_C2, 0);
+  await refreshView();
+});
+
+/** ============================================
+ * リセット・並び替え（デモ用）
+ * ============================================ */
+document.getElementById("reset").addEventListener("click", async () => {
+  nsave(LS_MIXED_C1, 0);
+  nsave(LS_MIXED_C2, 0);
+  await refreshView();
+});
+
+document.getElementById("shuffle").addEventListener("click", async () => {
+  shuffledView = !shuffledView;
+  await refreshView();
+});
+
+window.addEventListener("beforeunload", () => {
+  revokeUrls(mineObjUrls);
+  revokeUrls(c1ObjUrls);
+  revokeUrls(c2ObjUrls);
+});
+</script>
+</body>
+</html>
