@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Travel Photo Drip Demo (Timeline + 2 Companions)</title>
+  <title>Travel Photo Drip Demo (Unified Timeline + 2 Companions)</title>
   <style>
     :root{
       --bg:#0b0c10; --panel:#12131a; --text:#e9e9ee; --muted:#a6a6b3; --line:#242635;
       --accent:#6ee7ff;
       --c1:#ffcf6e; /* 同行者1枠（黄色） */
-      --c2:#00b7ff; /* 同行者2枠（水色） */
+      --c2:#00b7ff; /* 同行者2枠（濃い水色） */
     }
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);}
     header{position:sticky;top:0;z-index:10;background:rgba(11,12,16,.92);backdrop-filter:blur(10px);
@@ -57,10 +57,10 @@
 
 <body>
 <header>
-  <h1>旅行写真の “じわじわ共有” デモ（時系列＋同行者2人）</h1>
+  <h1>旅行写真の “じわじわ共有” デモ（完全統合タイムライン＋同行者2人）</h1>
   <p class="sub">
-    表示は「撮影日時（EXIF）順」。開くたびに同行者の写真が1〜2枚ずつ増えて、自分のタイムラインに“割り込んでくる”ように混ざります。
-    ※EXIFが取れない画像はアップロード日時で代用します。
+    表示は「撮影日時（EXIF）順」。EXIFが無い場合は「ファイルの最終更新時刻（lastModified）」を使い、
+    それでも不明ならアップロード時刻で代用します。開くたびに同行者写真が1〜2枚ずつ増えます。
   </p>
 </header>
 
@@ -101,8 +101,8 @@
     </div>
 
     <p class="hint">
-      使い方：①自分写真をアップロード（保持）→ ②同行者①/②の名前を入力して写真アップロード（保持）→ ③ページを再読み込みすると同行者写真が少しずつ増えて混ざります。<br/>
-      ※保存は同端末のブラウザ内（IndexedDB）です。
+      ※「3ブロック化」してしまうのは、EXIFが無い写真が多いとアップロード時刻で固まりやすいからです。
+      この版は lastModified を優先して埋めるので、より自然に混ざります。
     </p>
   </section>
 
@@ -119,7 +119,7 @@
 /** ============================================
  * IndexedDB（自分 + 同行者① + 同行者② を保存）
  * ============================================ */
-const DB_NAME = "drip_demo_db_v3";
+const DB_NAME = "drip_demo_db_v4";
 const DB_VERSION = 1;
 const STORE_MINE = "mine";
 const STORE_C1 = "companion1";
@@ -165,16 +165,19 @@ async function putRow(storeName, row){
 async function clearStore(storeName){
   return withStore(storeName, "readwrite", async (store) => { store.clear(); });
 }
+async function getAllRows(storeName){
+  return withStore(storeName, "readonly", async (store) => (await promisifyRequest(store.getAll())) || []);
+}
 
 /** ============================================
  * localStorage（混ざり進行 & 同行者の固定順序）
  * ============================================ */
-const LS_MIXED_C1 = "drip_mixed_c1_v1";
-const LS_MIXED_C2 = "drip_mixed_c2_v1";
-const LS_ORDER_C1 = "drip_order_c1_v1";
-const LS_ORDER_C2 = "drip_order_c2_v1";
-const LS_NAME_C1 = "drip_name_c1_v1";
-const LS_NAME_C2 = "drip_name_c2_v1";
+const LS_MIXED_C1 = "drip_mixed_c1_v2";
+const LS_MIXED_C2 = "drip_mixed_c2_v2";
+const LS_ORDER_C1 = "drip_order_c1_v2";
+const LS_ORDER_C2 = "drip_order_c2_v2";
+const LS_NAME_C1 = "drip_name_c1_v2";
+const LS_NAME_C2 = "drip_name_c2_v2";
 
 function nload(key){ const n=parseInt(localStorage.getItem(key)||"0",10); return Number.isFinite(n)?n:0; }
 function nsave(key,n){ localStorage.setItem(key,String(n)); }
@@ -192,11 +195,8 @@ function shuffleArray(arr){
   }
   return a;
 }
+function dripTotalAmount(){ return 1 + Math.floor(Math.random() * 2); } // 合計1〜2
 
-// 1回開くたびに「合計 1〜2 枚」増える
-function dripTotalAmount(){ return 1 + Math.floor(Math.random() * 2); }
-
-/** 同行者ストアごとに「固定ランダム順」を用意 */
 async function ensureOrder(storeName, lsOrderKey, lsMixedKey){
   const ids = await listKeys(storeName);
   const set = new Set(ids);
@@ -214,7 +214,6 @@ async function ensureOrder(storeName, lsOrderKey, lsMixedKey){
   return { ids, order };
 }
 
-/** 「開くたび」に、C1/C2どちらか（残数がある方）へ 1〜2 枚分を割り振る */
 async function stepDripCombined(){
   const c1 = await ensureOrder(STORE_C1, LS_ORDER_C1, LS_MIXED_C1);
   const c2 = await ensureOrder(STORE_C2, LS_ORDER_C2, LS_MIXED_C2);
@@ -231,7 +230,6 @@ async function stepDripCombined(){
     const can2 = mixed2 < max2;
     if(!can1 && !can2) break;
 
-    // 残っている方からランダムに選ぶ（両方あるなら50:50）
     if(can1 && can2){
       if(Math.random() < 0.5) mixed1++; else mixed2++;
     }else if(can1){
@@ -240,19 +238,16 @@ async function stepDripCombined(){
       mixed2++;
     }
   }
-
   nsave(LS_MIXED_C1, clamp(mixed1, 0, max1));
   nsave(LS_MIXED_C2, clamp(mixed2, 0, max2));
 }
 
 /** ============================================
- * EXIFから撮影日時を取り出す
+ * EXIF / 時刻決定ロジック（重要）
  * ============================================ */
-// exifr.lite で DateTimeOriginal などを読む
-async function extractTakenAtMs(fileOrBlob){
+async function extractTakenAtMs(blob){
   try{
-    // lite版は DateTimeOriginal / CreateDate / ModifyDate あたりを返すことが多い
-    const data = await exifr.parse(fileOrBlob, { translateValues: true });
+    const data = await exifr.parse(blob, { translateValues: true });
     const dt =
       data?.DateTimeOriginal ||
       data?.CreateDate ||
@@ -265,34 +260,61 @@ async function extractTakenAtMs(fileOrBlob){
       const t = Date.parse(dt);
       if(Number.isFinite(t)) return t;
     }
-  }catch(e){
-    // EXIF無し/読めない場合は無視
-  }
+  }catch(e){}
   return null;
+}
+
+// ★「必ずtsを埋める」：EXIF→lastModified→createdAt→now
+async function decideBestTimestampMs(fileOrBlob, createdAtFallback){
+  const exifMs = await extractTakenAtMs(fileOrBlob);
+  if(Number.isFinite(exifMs) && exifMs !== null) return exifMs;
+
+  // File の場合は lastModified が使える（Blobには無い）
+  const lm = typeof fileOrBlob?.lastModified === "number" ? fileOrBlob.lastModified : null;
+  if(Number.isFinite(lm) && lm !== null) return lm;
+
+  if(Number.isFinite(createdAtFallback) && createdAtFallback !== null) return createdAtFallback;
+  return Date.now();
+}
+
+/** 既にDBに入っている古いデータで、takenAtMsが空なら埋め直す（軽いマイグレーション） */
+async function migrateMissingTimestamps(){
+  async function migrateStore(storeName){
+    const rows = await getAllRows(storeName);
+    for(const row of rows){
+      const meta = row.meta || {};
+      const hasTs = typeof meta.takenAtMs === "number" && Number.isFinite(meta.takenAtMs);
+      if(hasTs) continue;
+
+      // BlobからEXIFを試し、ダメなら createdAt を採用（lastModifiedはBlobだと取れない）
+      const best = await decideBestTimestampMs(row.blob, row.createdAt ?? Date.now());
+      meta.takenAtMs = best;
+      row.meta = meta;
+      await putRow(storeName, row);
+    }
+  }
+  await migrateStore(STORE_MINE);
+  await migrateStore(STORE_C1);
+  await migrateStore(STORE_C2);
 }
 
 /** ============================================
  * UI / 描画
  * ============================================ */
 const elMyFiles = document.getElementById("myFiles");
-
 const elC1Name = document.getElementById("c1Name");
 const elC1Files = document.getElementById("c1Files");
-
 const elC2Name = document.getElementById("c2Name");
 const elC2Files = document.getElementById("c2Files");
 
 const elGrid = document.getElementById("grid");
 const elTotal = document.getElementById("total");
-
 const elMinePool = document.getElementById("minePool");
 const elC1Pool = document.getElementById("c1Pool");
 const elC2Pool = document.getElementById("c2Pool");
-
 const elMineN = document.getElementById("mineN");
 const elC1N = document.getElementById("c1N");
 const elC2N = document.getElementById("c2N");
-
 const elMixedC1 = document.getElementById("mixedC1");
 const elMixedC2 = document.getElementById("mixedC2");
 
@@ -318,6 +340,7 @@ async function refreshPoolCounts(){
   const mineIds = await listKeys(STORE_MINE);
   const c1Ids = await listKeys(STORE_C1);
   const c2Ids = await listKeys(STORE_C2);
+
   elMinePool.textContent = String(mineIds.length);
   elC1Pool.textContent = String(c1Ids.length);
   elC2Pool.textContent = String(c2Ids.length);
@@ -329,7 +352,6 @@ async function refreshPoolCounts(){
 async function buildItemsForView(){
   revokeUrls(mineObjUrls); revokeUrls(c1ObjUrls); revokeUrls(c2ObjUrls);
 
-  // 自分：全件表示
   const mineIds = await listKeys(STORE_MINE);
   const mineItems = [];
   for(const id of mineIds){
@@ -342,12 +364,12 @@ async function buildItemsForView(){
       kind: "mine",
       who: "自分",
       note: meta.name || "",
-      ts: meta.takenAtMs ?? row.createdAt ?? 0,
-      src: url
+      ts: (typeof meta.takenAtMs === "number" ? meta.takenAtMs : (row.createdAt ?? 0)),
+      src: url,
+      tie: id
     });
   }
 
-  // 同行者①：混ざった分だけ（固定ランダム順の先頭から）
   const { order: order1 } = await ensureOrder(STORE_C1, LS_ORDER_C1, LS_MIXED_C1);
   const n1 = clamp(nload(LS_MIXED_C1), 0, order1.length);
   const c1Items = [];
@@ -361,12 +383,12 @@ async function buildItemsForView(){
       kind: "c1",
       who: meta.who || "同行者①",
       note: meta.name || "",
-      ts: meta.takenAtMs ?? row.createdAt ?? 0,
-      src: url
+      ts: (typeof meta.takenAtMs === "number" ? meta.takenAtMs : (row.createdAt ?? 0)),
+      src: url,
+      tie: id
     });
   }
 
-  // 同行者②：混ざった分だけ
   const { order: order2 } = await ensureOrder(STORE_C2, LS_ORDER_C2, LS_MIXED_C2);
   const n2 = clamp(nload(LS_MIXED_C2), 0, order2.length);
   const c2Items = [];
@@ -380,8 +402,9 @@ async function buildItemsForView(){
       kind: "c2",
       who: meta.who || "同行者②",
       note: meta.name || "",
-      ts: meta.takenAtMs ?? row.createdAt ?? 0,
-      src: url
+      ts: (typeof meta.takenAtMs === "number" ? meta.takenAtMs : (row.createdAt ?? 0)),
+      src: url,
+      tie: id
     });
   }
 
@@ -389,10 +412,14 @@ async function buildItemsForView(){
 }
 
 function renderTimeline(all){
-  // 時系列（昇順）で統合
-  all.sort((a,b) => (a.ts ?? 0) - (b.ts ?? 0));
+  // ★完全統合：全員まとめて ts でソート（同値は tie で安定化）
+  all.sort((a,b) => {
+    const ta = (typeof a.ts === "number" ? a.ts : 0);
+    const tb = (typeof b.ts === "number" ? b.ts : 0);
+    if(ta !== tb) return ta - tb;
+    return String(a.tie).localeCompare(String(b.tie));
+  });
 
-  // デモ用：並び替えボタンで全体シャッフル
   if(shuffledView){
     for(let i=all.length-1;i>0;i--){
       const j = Math.floor(Math.random()*(i+1));
@@ -448,28 +475,33 @@ async function refreshView(){
 }
 
 /** ============================================
- * 起動：開くたびに drip
+ * 起動
  * ============================================ */
 (async function boot(){
-  // 名前欄の復元
   elC1Name.value = sload(LS_NAME_C1);
   elC2Name.value = sload(LS_NAME_C2);
 
+  // 既存DBの「ts空」を埋める → これでブロック化しにくくなる
+  await migrateMissingTimestamps();
+
+  // 開くたびに混ざりを進行
   await stepDripCombined();
+
   await refreshView();
 })();
 
 /** ============================================
- * アップロード：自分
+ * アップロード：自分（tsを必ず埋める）
  * ============================================ */
-document.getElementById("myFiles").addEventListener("change", async () => {
+elMyFiles.addEventListener("change", async () => {
   const files = Array.from(elMyFiles.files || []);
   if(files.length === 0) return;
 
   for(let i=0;i<files.length;i++){
     const f = files[i];
     const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "_m_" + i + "_" + Math.random().toString(16).slice(2));
-    const takenAtMs = await extractTakenAtMs(f);
+
+    const takenAtMs = await decideBestTimestampMs(f, Date.now());
     await putRow(STORE_MINE, {
       id,
       blob: f,
@@ -477,6 +509,7 @@ document.getElementById("myFiles").addEventListener("change", async () => {
       createdAt: Date.now()
     });
   }
+
   elMyFiles.value = "";
   await refreshView();
 });
@@ -487,7 +520,7 @@ document.getElementById("clearMine").addEventListener("click", async () => {
 });
 
 /** ============================================
- * アップロード：同行者①
+ * アップロード：同行者①（tsを必ず埋める）
  * ============================================ */
 elC1Name.addEventListener("input", () => ssave(LS_NAME_C1, elC1Name.value));
 
@@ -506,7 +539,8 @@ elC1Files.addEventListener("change", async () => {
   for(let i=0;i<files.length;i++){
     const f = files[i];
     const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "_c1_" + i + "_" + Math.random().toString(16).slice(2));
-    const takenAtMs = await extractTakenAtMs(f);
+
+    const takenAtMs = await decideBestTimestampMs(f, Date.now());
     await putRow(STORE_C1, {
       id,
       blob: f,
@@ -515,9 +549,7 @@ elC1Files.addEventListener("change", async () => {
     });
   }
 
-  // 新規追加分を順序に反映（既存順序は維持）
   await ensureOrder(STORE_C1, LS_ORDER_C1, LS_MIXED_C1);
-
   elC1Files.value = "";
   await refreshView();
 });
@@ -530,7 +562,7 @@ document.getElementById("clearC1").addEventListener("click", async () => {
 });
 
 /** ============================================
- * アップロード：同行者②（枠は水色）
+ * アップロード：同行者②（tsを必ず埋める）
  * ============================================ */
 elC2Name.addEventListener("input", () => ssave(LS_NAME_C2, elC2Name.value));
 
@@ -549,7 +581,8 @@ elC2Files.addEventListener("change", async () => {
   for(let i=0;i<files.length;i++){
     const f = files[i];
     const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + "_c2_" + i + "_" + Math.random().toString(16).slice(2));
-    const takenAtMs = await extractTakenAtMs(f);
+
+    const takenAtMs = await decideBestTimestampMs(f, Date.now());
     await putRow(STORE_C2, {
       id,
       blob: f,
@@ -559,7 +592,6 @@ elC2Files.addEventListener("change", async () => {
   }
 
   await ensureOrder(STORE_C2, LS_ORDER_C2, LS_MIXED_C2);
-
   elC2Files.value = "";
   await refreshView();
 });
